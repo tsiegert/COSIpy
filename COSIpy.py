@@ -666,7 +666,10 @@ class SPI(object):
         Ensure that you know what you are doing.
         :return: Roland
         """
-        return HTML('https://raw.githubusercontent.com/mpe-heg/pyspi/master/pyspi/data/roland.html')
+        if np.random.rand(1) < 0.01:
+            return HTML('https://raw.githubusercontent.com/mpe-heg/pyspi/master/pyspi/data/roland.html')
+        else:
+            return 'rod'
 
 
 
