@@ -64,10 +64,7 @@ class fit():
     
     
     def reduce_dataset_CDS(self):
-    """
-    Reduce data space, given background response, to ignore bins that are always zero
-    """
-    
+        
         # init list of data sets per bin
         # will be irregularly-shaped because CDS population depends on energy
         count_data_reduced = []
@@ -87,12 +84,13 @@ class fit():
             count_data_reduced.append(yp_tmp)
             
         return count_data_reduced
+
     
     
     def make_dictionaries_for_stan(self):
-    """
-    Create dictionaries that can be read in by the Stan model to fit the data
-    """
+        """
+        Create dictionaries that can be read in by the Stan model to fit the data
+        """
 
         # init dictionaries for each energy bini
         all_dicts = []
@@ -106,24 +104,27 @@ class fit():
             Nsky = 1
 
             # standard priors scaling the initial flux as in response calculation
-            if self.priors == None:
+            if np.any(self.priors == None):
 
                 # mean
                 mu_flux_scl = np.array([1.])    # prior centroids for sky, we use 10 because we are ignorant;
                 # this has to be an array because it could be more than one
                 # std
                 sigma_flux_scl = np.array([1.]) # same for the width (so, easily 0 but also high values possible)
-            
+
+                # priors for backgrorund model components
+                # initially normalised to 1, so mean would be 1, variance very large (uninformative)
+                mu_Abg = 1.       # for the moment set to a useful value if bg model is ~normalised to data
+                sigma_Abg = 1e4   # same
+                
             else:
 
                 # set priors yourself
-                mu_flux_scl = np.array([self.priors[0]])
-                sigma_flux_scl = np.array([self.priors[1]])
+                mu_flux_scl = np.array([self.priors[0,0]])
+                sigma_flux_scl = np.array([self.priors[0,1]])
 
-            # priors for backgrorund model components
-            # initially normalised to 1, so mean would be 1, variance very large (uninformative)
-            mu_Abg = 1.       # for the moment set to a useful value if bg model is ~normalised to data
-            sigma_Abg = 1e4   # same
+                mu_Abg = self.priors[1,0]       # for the moment set to a useful value if bg model is ~normalised to data
+                sigma_Abg = self.priors[1,1]   # same
 
             # dictionary for data set and prior
             data2D = dict(N = Nrsp,                                                      # number of CDS bins
@@ -147,9 +148,9 @@ class fit():
     
     
     def make_dictionaries_for_stan_bg_only(self):
-    """
-    Same as above just for background-only fit
-    """
+        """
+        Same as above just for background-only fit
+        """
         # init dictionary per energy bin
         all_dicts = []
 
@@ -159,9 +160,19 @@ class fit():
             Np, Nrsp = self.background.bg_model_reduced[i].shape         # initialise sizes of arrays
             N = Np*Nrsp                                                  # total number of data points
 
-            mu_Abg = 1.                     # for the moment set to a useful value if bg model is ~normalised to data
-            sigma_Abg = 100.                # same
+            # standard priors scaling the initial flux as in response calculation
+            if np.any(self.priors == None):
 
+                mu_Abg = 1.       # for the moment set to a useful value if bg model is ~normalised to data
+                sigma_Abg = 1e4   # same
+
+            else:
+
+                # set priors yourself
+                mu_Abg = self.priors[1,0]       # for the moment set to a useful value if bg model is ~normalised to data
+                sigma_Abg = self.priors[1,1]   # same
+
+            
             # dictionary for data set and prior
             data2D = dict(N = Nrsp,
                           Np = Np,
@@ -178,10 +189,10 @@ class fit():
     
     
     def load_stan_model(self):
-    """
-    Loading the Stan model COSImodfit.stan.
-    Compiles it if not already done.
-    """
+        """
+        Loading the Stan model COSImodfit.stan.
+        Compiles it if not already done.
+        """
         try:
             #read COSImodefit.pkl (if already compiled)
             self.model = pickle.load(open('COSImodfit.pkl', 'rb'))
@@ -197,10 +208,10 @@ class fit():
     
     
     def load_stan_model_bg_only(self):
-    """
-    Loading Stan model for background only.
-    Compiles it of not already done.
-    """
+        """
+        Loading Stan model for background only.
+        Compiles it of not already done.
+        """
         try:
             #read COSImodfit_BGonly.pkl (if already compiled)
             self.model = pickle.load(open('COSImodfit_BGonly.pkl', 'rb'))
@@ -216,12 +227,12 @@ class fit():
                 
     
     def MAP_solution(self,guess=1.0,method='LBFGS'):
-    """
-    Performs optimisation of the joint posterior distribution and returns Median A-Posteriori (MAP) point estimate.
-    Returns no error bars and serves as quick cross check or for calls to likelihood ratio tests.
-    Creates array .diff_flux_map that includes the differential flux in units of ph/cm2/s/keV for each energy bin.
-    Saves all fit results and quality in .fit_pars_map.
-    """
+        """
+        Performs optimisation of the joint posterior distribution and returns Median A-Posteriori (MAP) point estimate.
+        Returns no error bars and serves as quick cross check or for calls to likelihood ratio tests.
+        Creates array .diff_flux_map that includes the differential flux in units of ph/cm2/s/keV for each energy bin.
+        Saves all fit results and quality in .fit_pars_map.
+        """
         # init arrays to save info
         self.fit_pars_map = []
         self.diff_flux_map = np.zeros(self.dataset.energies.n_energy_bins)
@@ -230,6 +241,7 @@ class fit():
         for i in tqdm(range(self.dataset.energies.n_energy_bins),desc='Loop over energy bins:'):
             if self.verbose:
                 print('Start optimising energy bin '+str(i+1)+'/'+str(self.dataset.energies.n_energy_bins)+'...')
+                print('\nEnergy range: '+str(self.dataset.energies.energy_bin_min[i])+'-'+str(self.dataset.energies.energy_bin_max[i])+' keV ...')
                 
             # not necessary in general, but good for quicklook MAP estimate
             init = {}
@@ -274,6 +286,8 @@ class fit():
             if self.verbose:
                 print('###################################################################')
                 print('\nStart fitting energy bin '+str(i+1)+'/'+str(self.dataset.energies.n_energy_bins)+'...')
+                print('\nEnergy range: '+str(self.dataset.energies.energy_bin_min[i])+'-'+str(self.dataset.energies.energy_bin_max[i])+' keV ...')
+                
 
             # fit including sky
             if not self.bg_only:
@@ -326,14 +340,14 @@ class fit():
             
             
     def TS_map(self,grid):
-    """
-    TS: still experimental
-    Creating a test statistics map from optimising a grid of point source positions.
-    :param: grid: 2D grid of longitude/latitude coordinates to test above a background-only fit.
-
-    Output: .TS_bg_only and .TS_vals that include the absolute values of all likelihoods.
-    TS: will need to include plotting routine for illustrate the results of this call
-    """
+        """
+        TS: still experimental
+        Creating a test statistics map from optimising a grid of point source positions.
+        :param: grid: 2D grid of longitude/latitude coordinates to test above a background-only fit.
+        
+        Output: .TS_bg_only and .TS_vals that include the absolute values of all likelihoods.
+        TS: will need to include plotting routine for illustrate the results of this call
+        """
 
         # tested grid
         self.grid = grid

@@ -807,13 +807,14 @@ class FISBEL(dataset):
                 LongitudeBins[n_collars-collar-1] = NextBins
                 if (collar != n_collars/2):
                     LatitudeBinEdges[n_collars-collar-1] = np.pi - NextEdge
-          
+
+
         LongitudeBinEdges = []
         for nl in LongitudeBins:
             if (nl == 1):
                 LongitudeBinEdges.append(np.array([0,2*np.pi]))
             else:
-                n_lon_edges = nl+1
+                n_lon_edges = int(nl+1)
                 LongitudeBinEdges.append(np.linspace(0,2*np.pi,n_lon_edges))
     
             #verb(verbose,'LatitudeBins: %4i' % n_collars)
@@ -1046,8 +1047,18 @@ class BG():
         self.filename = filename
         self.n_time_bins = dataset.times.n_time_bins
         self.times_wid = dataset.times.times_wid*2 # half-widths * 2
-        
-        self.default_bg_response_file = 'flight_bg_all_v1_fine.npz'
+
+        if self.bg_mode == 'default':
+            print('Reading in flight-average background response for 5 deg CDS binning ...')
+            self.default_bg_response_file = 'flight_bg_all_v1_fine.npz'
+        elif self.bg_mode == 'default 3deg':
+            print('Reading in flight-average background response for 3 deg CDS binning ...')
+            self.default_bg_response_file = 'flight_bg_all_v1_fine_3deg.npz'
+        elif self.bg_mode == 'default 6deg':
+            print('Reading in flight-average background response for 6 deg CDS binning ...')
+            self.default_bg_response_file = 'flight_bg_all_v1_fine_6deg.npz'
+        else:
+            print('Using background mode: '+self.bg_mode)
 
         # construct / read response
         if self.bg_mode == 'from data':
@@ -1184,8 +1195,8 @@ class BG():
                 idx_rsp = idx
 
                 # exception when last bin would be included
-                if (idx_rsp == 153):
-                    idx_rsp = 152
+                if (idx_rsp == 160):
+                    idx_rsp = 160-1
 
             # case where boundaries would fall into neighbouring bins
             elif (len(idx) == 1):
@@ -1242,7 +1253,7 @@ class BG():
 
                 idx_rsp = np.concatenate([np.array([idx[0]-1]),idx])
 
-                if (idx_rsp[-1] == 153):
+                if (idx_rsp[-1] == 160):
                     idx_rsp = np.delete(idx_rsp,-1)
                     weights = np.delete(weights,-1)
 
@@ -1446,6 +1457,8 @@ def circle_on_the_sky(ls,bs,th,n_points=100):
     
     return l_calc,b_calc
 
+
+
 def vector_length(x,y,z):
     """
     Return Euclidean (L2) norm of a 3D vector (or series of vectors in x/y/z coordiantes):
@@ -1455,3 +1468,14 @@ def vector_length(x,y,z):
     :param: z    z value(s)
     """
     return np.sqrt(x**2+y**2+z**2)
+
+
+def find_nearest(array, value):
+    """
+    Find nearest index for value in array (where for non-existent values)
+    :param: array   Input array
+    :param: value   value to search for
+    """
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return idx
