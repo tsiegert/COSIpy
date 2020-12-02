@@ -18,6 +18,8 @@ from COSIpy import GreatCircle
 from COSIpy import angular_distance
 from COSIpy import find_nearest
 
+deg2rad = np.pi/180
+
 class SkyResponse:
 
     def __init__(self,
@@ -371,7 +373,7 @@ class SkyResponse:
 
         if reduced:
  #           try:
-            for i in range(dataset.energies.n_energy_bins):
+            for i in tqdm(range(dataset.energies.n_energy_bins),'Loop over energy bins: '):
                     
                 # reshape background model to reduce CDS if possible
                 # this combines the 3 CDS angles into a 1D array for all times at the chosen energy
@@ -390,22 +392,35 @@ class SkyResponse:
                 elif self.n_e > 1:
                     rsp_idx = find_nearest(self.e_cen,dataset.energies.energy_bin_cen[i])
                     # sum over initial energy axis already to get entry for measured energy with all initials possible
-                    print(self.rsp.response_grid_normed.shape)
+                    #print(self.rsp.response_grid_normed.shape)
+
+                    # something with energy normalisation???
+                    #erg_mat = np.meshgrid(self.e_wid,self.e_wid)
+
+                    #print(erg_mat)
+
                     #print('Using sum over initial energies (???)') # TS: this is dumb becaue you assume every bin to contribute the same, but which is generally not the case
-                    #rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:],axis=3)[:,:,:,rsp_idx]
-                    print('Using only diagonal terms (???)')
-                    rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,rsp_idx,rsp_idx]
+                    #rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:]/erg_mat[0][None,None,None,:,:],axis=3)[:,:,:,rsp_idx]
+                    #rsp_tmp /= np.sum(rsp_tmp)
+                    #print('Using sum over final energies (???)') # TS: why should this be correct? + energy stuff??!?!?!
+                    rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:],axis=3)[:,:,:,rsp_idx]
+                    #print('Using only diagonal terms (???)')
+                    #rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,rsp_idx,rsp_idx]
+                    #rsp_tmp /= np.sum(rsp_tmp)
                     
-                    print(rsp_tmp.shape)
+                    #print(rsp_tmp.shape)
                     
                 # shouldnt happen
                 else:
                     print('Something went wrong ...')
 
-                        
-                # sky response per pointing (weighted by (small) time interval in pointings to get counts
-                sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=60,binsize=pixel_size)*pointings.dtpoins[:,None]
 
+                # sky response per pointing (weighted by (small) time interval in pointings to get counts
+                # zenith pixel size at time:
+                #zenith_pixel_size = (np.sin((zens+dataset.pixel_size/2)*deg2rad)-np.sin((zens-dataset.pixel_size/2)*deg2rad))*dataset.pixel_size*deg2rad
+                #zenith_pixel_size[np.isnan(zenith_pixel_size)] = 0.
+                sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=60,binsize=pixel_size)*pointings.dtpoins[:,None]#*zenith_pixel_size[:,None]
+                sky_response_pp[np.isnan(sky_response_pp)] = 0.
 
                 # pre-define response array per time bin to fill
                 sky_response_hh = np.zeros((dataset.times.n_time_bins,len(calc_this)))
@@ -415,6 +430,10 @@ class SkyResponse:
                                    (pointings.cdtpoins <= dataset.times.times_max[c]))[0]
                         
                     sky_response_hh[c,:] = np.sum(sky_response_pp[cdx,:],axis=0)
+
+
+                # normalise response to total effective area?
+                sky_response_hh /= np.sum(sky_response_hh)#/np.sum(pointings.dtpoins)
 
                 # calculate sky model count expectaion
                 self.sky_response.append(sky_response_hh*self.flux_norm)
@@ -448,6 +467,8 @@ class SkyResponse:
 
 
                 # sky response per pointing (weighted by (small) time interval in pointings to get counts
+                # zenith pixel size at time:
+                zenith_pixel_size = (np.sin((zens+dataset.pixel_size/2)*deg2rad)-np.sin((zens-dataset.pixel_size/2)*deg2rad))*analysis.dataset.pixel_size*deg2rad
                 sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=90,binsize=pixel_size)*pointings.dtpoins[:,None]
 
                 # pre-define response array per time bin to fill
@@ -546,8 +567,15 @@ def get_response_with_weights(Response,zenith,azimuth,deg=True,binsize=5,cut=60.
     # at the correct positions of the input angles ([:, None] is the same as 
     # column-vector multiplcation of a lot of ones)
 
+    # check for negative weights and indices and remove
+    widx[1][widx[0][:,0,:] < 0] = 0.
+    widx[1][widx[0][:,1,:] < 0] = 0.
+    for i in range(4):
+        widx[0][i,0,widx[0][i,0,:] < 0] = 0.
+        widx[0][i,1,widx[0][i,1,:] < 0] = 0.
+    
     # one energy bin
-    print(Response.shape,len(Response.shape))
+    #print(Response.shape,len(Response.shape))
     if len(Response.shape) < 4:
         rsp0 = Response[widx[0][0,1,:],widx[0][0,0,:],:]*widx[1][0,:][:, None]
         rsp1 = Response[widx[0][1,1,:],widx[0][1,0,:],:]*widx[1][1,:][:, None]

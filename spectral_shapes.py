@@ -13,12 +13,33 @@ def powerlaw(energy, p):
     :param p:      p[1] = Power-law index (unitless)
 
     Misc:
-    E0 = 1000 keV  Pivotal energy, i.e. where the power-law is normalised at (in keV)
+    E0 = 100 keV  Pivotal energy, i.e. where the power-law is normalised at (in keV)
     """
     
-    E0 = 1000.
+    E0 = 100.
     
     return p[0]*np.power(energy/E0,p[1])
+
+
+def powerlaw_boxcar(energy, p):
+    """
+    Returns:
+    Differential flux shaped as power-law function "in units of ph/cm2/s/keV"
+    
+    Parameters:
+    :param energy: 1D-array of energies where power-law is evaluated (in keV)
+    :param p:      p[0] = Normalisation (in ph/cm2/s/keV)
+    :param p:      p[1] = Power-law index (unitless)
+    :param p:      p[2] = Lower energy bound
+    :param p:      p[3] = Higher energy bound
+
+    Misc:
+    E0             Pivotal energy, i.e. where the power-law is normalised at (in keV)
+    """
+    
+    E0 = 100.
+
+    return p[0]*np.power(energy/E0,p[1])*np.heaviside(energy-p[2],0)*np.heaviside(p[3]-energy,0)
 
 
 def cutoff_powerlaw(energy,p):
