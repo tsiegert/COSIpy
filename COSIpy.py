@@ -975,45 +975,56 @@ class Pointing():
             
                 # begin iterative combination of triggers up to angle_threshold
                 # first photon
-                i = 0
-                save_zpoins = [zpoins_tmp[i,:]]
-                save_ypoins = [ypoins_tmp[i,:]]
-                save_xpoins = [xpoins_tmp[i,:]]
-                save_times = []
-                save_f = [0]
-        
-                # next photon wrt to first trigger in block
-                for f in range(n_ph):
-                
-                    # calculate angular distance in all 3 directions
-                    # (very important because non-circular response)
-                    dz = angular_distance(zpoins_tmp[f,0],zpoins_tmp[f,1],
-                                          zpoins_tmp[i,0],zpoins_tmp[i,1])
-                    dy = angular_distance(ypoins_tmp[f,0],ypoins_tmp[f,1],
-                                          ypoins_tmp[i,0],ypoins_tmp[i,1])
-                    dx = angular_distance(xpoins_tmp[f,0],xpoins_tmp[f,1],
-                                          xpoins_tmp[i,0],xpoins_tmp[i,1])
-                
-                    # time bin (see warning above, and work-around below)
-                    dt = times_tmp[f]-times_tmp[i]
-                    # if any of the angles is greater than threshold,
-                    # save the first trigger as average pointing
-                    # this is arbitrary and could be any point inside the block;
-                    # it only defines a point in which the stability is
-                    # angle_threshold degrees.
-                    if ((dz >= self.angle_threshold) | (dy >= self.angle_threshold) | (dx >= self.angle_threshold)) | (f == n_ph-1):
-                        save_zpoins.append(zpoins_tmp[f,:])
-                        save_ypoins.append(ypoins_tmp[f,:])
-                        save_xpoins.append(xpoins_tmp[f,:])
-                        save_times.append(dt)
-                        save_f.append(f)
-                        # make last to first and repeat until all photons are inside
-                        i = f
 
-                # append last time segment as delta between time bin edge and 
-                # that was already accounted for
-                # (last entry can be important)
-                # TS: is this correct?
+                # if no photon in time bin:
+                if n_ph == 0:
+
+                    save_zpoins = [[np.nan,np.nan]]
+                    save_ypoins = [[np.nan,np.nan]]
+                    save_xpoins = [[np.nan,np.nan]]
+                    save_times = []
+
+                else:
+                
+                    i = 0
+                    save_zpoins = [zpoins_tmp[i,:]]
+                    save_ypoins = [ypoins_tmp[i,:]]
+                    save_xpoins = [xpoins_tmp[i,:]]
+                    save_times = []
+                    save_f = [0]
+        
+                    # next photon wrt to first trigger in block
+                    for f in range(n_ph):
+                
+                        # calculate angular distance in all 3 directions
+                        # (very important because non-circular response)
+                        dz = angular_distance(zpoins_tmp[f,0],zpoins_tmp[f,1],
+                                              zpoins_tmp[i,0],zpoins_tmp[i,1])
+                        dy = angular_distance(ypoins_tmp[f,0],ypoins_tmp[f,1],
+                                              ypoins_tmp[i,0],ypoins_tmp[i,1])
+                        dx = angular_distance(xpoins_tmp[f,0],xpoins_tmp[f,1],
+                                              xpoins_tmp[i,0],xpoins_tmp[i,1])
+                
+                        # time bin (see warning above, and work-around below)
+                        dt = times_tmp[f]-times_tmp[i]
+                        # if any of the angles is greater than threshold,
+                        # save the first trigger as average pointing
+                        # this is arbitrary and could be any point inside the block;
+                        # it only defines a point in which the stability is
+                        # angle_threshold degrees.
+                        if ((dz >= self.angle_threshold) | (dy >= self.angle_threshold) | (dx >= self.angle_threshold)) | (f == n_ph-1):
+                            save_zpoins.append(zpoins_tmp[f,:])
+                            save_ypoins.append(ypoins_tmp[f,:])
+                            save_xpoins.append(xpoins_tmp[f,:])
+                            save_times.append(dt)
+                            save_f.append(f)
+                            # make last to first and repeat until all photons are inside
+                            i = f
+
+                    # append last time segment as delta between time bin edge and 
+                    # that was already accounted for
+                    # (last entry can be important)
+                    # TS: is this correct?
                 save_times.append(dataset.data_time_tagged[t]['DeltaTime']-np.sum(save_times)) 
 
                 self.xpoins.extend(save_xpoins)
@@ -1022,8 +1033,8 @@ class Pointing():
                 self.dtpoins.extend(save_times)
 
                 self._n_ph.append(n_ph)
-                self._n_pointings.append(len(save_f))
-                self._pointing_cuts.extend(save_f)
+                #self._n_pointings.append(len(save_f))
+                #self._pointing_cuts.extend(save_f)
 
         self.zpoins  = np.array(self.zpoins)
         self.ypoins  = np.array(self.ypoins)
@@ -1177,9 +1188,9 @@ class BG():
             if (energy_bin_edges_tmp[e] < 143):
                 print('Energy bin '+str(e)+' below minimum threshold (143 keV), setting to 143 keV for BG response.')
                 energy_bin_edges_tmp[e] = 143.
-            if (energy_bin_edges_tmp[e+1] > 2500):
+            if (energy_bin_edges_tmp[e+1] > 5000):
                 print('Energy bin '+str(e+1)+' above maximum threshold (2500 keV), setting to 2500 keV for BG response.')        
-                energy_bin_edges_tmp[e+1] = 2500.
+                energy_bin_edges_tmp[e+1] = 5000.
 
             # finding indices in finely-binned background response
             idx = np.where((self.energy_bin_edges_bg >= energy_bin_edges_tmp[e]) &
@@ -1195,8 +1206,8 @@ class BG():
                 idx_rsp = idx
 
                 # exception when last bin would be included
-                if (idx_rsp == 160):
-                    idx_rsp = 160-1
+                if (idx_rsp == 174):
+                    idx_rsp = 174-1
 
             # case where boundaries would fall into neighbouring bins
             elif (len(idx) == 1):
@@ -1253,7 +1264,7 @@ class BG():
 
                 idx_rsp = np.concatenate([np.array([idx[0]-1]),idx])
 
-                if (idx_rsp[-1] == 160):
+                if (idx_rsp[-1] == 174):
                     idx_rsp = np.delete(idx_rsp,-1)
                     weights = np.delete(weights,-1)
 
