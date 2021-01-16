@@ -18,6 +18,8 @@ from COSIpy import GreatCircle
 from COSIpy import angular_distance
 from COSIpy import find_nearest
 
+#import logging as log
+
 deg2rad = np.pi/180
 
 class SkyResponse:
@@ -26,7 +28,16 @@ class SkyResponse:
                  filename,
                  pixel_size,
                  from_saved_file=True,
-                 energy_bin_edges=np.array([506,516])): # energy bin edges not used right now (read in through MEGAlib file)
+                 energy_bin_edges=np.array([506,516]),
+                 keep_everything=False,
+                 verbose=False): # energy bin edges not used right now (read in through MEGAlib file)
+
+        #if verbose:
+        #    log.basicConfig(format="%(levelname)s: %(message)s", level=log.INFO)
+        #    log.info("Verbose output.")
+        #else:
+        #    log.basicConfig(format="%(levelname)s: %(message)s", level=log.WARNING)
+        
         self.filename = filename
         self.pixel_size = pixel_size
         # the energy bins that will be used for the analysis, NOT (necessarily) the ones defined in the rsp file
@@ -37,7 +48,59 @@ class SkyResponse:
         self.rsp.init_binning(pixel_size=self.pixel_size,energy_bin_edges=self.energy_bin_edges)
 
         if from_saved_file:
+            #log.info('Reading complete response. This might take a while.')
+            # read everything in (very large in many cases)
+            print('Reading complete continuum response. This might take a while...')
             self.LoadRegularBinnedMEGAlibResponse()
+            print('Done.\n')
+
+            # reduced energy matrix
+            self.CDS_Summed_Response()
+
+            # remove full matrix after it is read in and built for IRF and RMF (default: do that because it is a huge thing...)
+            if not keep_everything:
+                self.ReduceToImportantParts()
+
+
+    def CDS_Summed_Response(self):
+
+        #log.info('Creating general RMF matrices, stay tuned.')
+        print('Creating general RMF matrices, stay tuned...')
+        # sum over CDS (phi and psi/chi) axis 2 and 3 of matrix:
+        # this allows quicker weightings for the RMF later
+        self.rsp.ZA_energy_response = 0
+        for i in tqdm(range(self.rsp.phis.n_phi_bins),'Loop over phi bins:'):
+            self.rsp.ZA_energy_response += np.sum(self.rsp.response_grid_normed[:,:,i,:,:,:],2)
+        print('Done.\n')
+
+        
+    def ReduceToImportantParts(self):
+
+        # for IRF, sum over initial energies (axis 4 if not reduced data space)
+        # self.rsp.response_grid_normed_efinal
+        print('Creating general IRF. Wait for it...')
+        
+        if self.n_e == 1:
+            self.rsp.response_grid_normed_efinal = np.copy(self.rsp.response_grid_normed)
+
+        # multiple energy bins:
+        # TS (Dec. 9 2020): until now only allowed for specific energy bins, interpolation (weighting) will come later
+        elif self.n_e > 1:
+            self.rsp.response_grid_normed_efinal = np.sum(self.rsp.response_grid_normed,axis=4)
+
+        # weird
+        else:
+            print('This should not happen, did you read in a response file?')
+
+        print('Done.\n')
+
+        # and delete the full matrix from the rsp object to save space
+        # yes, bad style
+        #@log.info('Deleting full matrix.')
+        print('Deleting full matrix.')
+        del self.rsp.response_grid_normed
+        print('Done. Now have fun.')
+            
 
     def ReadMEGAlibResponse(self):
         
@@ -358,16 +421,25 @@ class SkyResponse:
                               l_src,b_src,flux_norm,
                               reduced=True,
                               pixel_size=5.,
-                              background=None):
+                              background=None,
+                              lookup=True):
         self.l_src = l_src
         self.b_src = b_src
         self.flux_norm = flux_norm
 
+
+        print('Calculating zeniths and azimuths for all pointings ...')
         zens,azis = zenazi(pointings.xpoins[:,0],pointings.xpoins[:,1],
                            pointings.ypoins[:,0],pointings.ypoins[:,1],
                            pointings.zpoins[:,0],pointings.zpoins[:,1],
                            self.l_src,self.b_src)
 
+        #print('zens',zens)
+        #print('azis',azis)
+        
+        print('Done.\n')
+
+        print('Calculating CDS count expectations for all bins ...')
         # initialise sky response list to include all energies
         self.sky_response = []
 
@@ -399,11 +471,12 @@ class SkyResponse:
 
                     #print(erg_mat)
 
-                    #print('Using sum over initial energies (???)') # TS: this is dumb becaue you assume every bin to contribute the same, but which is generally not the case
-                    #rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:]/erg_mat[0][None,None,None,:,:],axis=3)[:,:,:,rsp_idx]
+                    #print('Using sum over initial energies (???)') # TS: this is the solution(!) gives correct output when extracting huge sky vs huge background
+                    # TS: this needs to be done only once when the response is read in: save time later!
+                    rsp_tmp = self.rsp.response_grid_normed_efinal.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e)[:,:,calc_this,rsp_idx]#[:,:,:,rsp_idx]
                     #rsp_tmp /= np.sum(rsp_tmp)
                     #print('Using sum over final energies (???)') # TS: why should this be correct? + energy stuff??!?!?!
-                    rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:],axis=3)[:,:,:,rsp_idx]
+                    #rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:],axis=4)[:,:,:,rsp_idx]
                     #print('Using only diagonal terms (???)')
                     #rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,rsp_idx,rsp_idx]
                     #rsp_tmp /= np.sum(rsp_tmp)
@@ -419,7 +492,8 @@ class SkyResponse:
                 # zenith pixel size at time:
                 #zenith_pixel_size = (np.sin((zens+dataset.pixel_size/2)*deg2rad)-np.sin((zens-dataset.pixel_size/2)*deg2rad))*dataset.pixel_size*deg2rad
                 #zenith_pixel_size[np.isnan(zenith_pixel_size)] = 0.
-                sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=60,binsize=pixel_size)*pointings.dtpoins[:,None]#*zenith_pixel_size[:,None]
+                # conversion from fisbel to regular includes a factor sin(zenith): otherwise nrow of fisbel will get lost in the conversion (???)
+                sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=60,binsize=pixel_size,lookup=lookup)*pointings.dtpoins[:,None]#/np.sin(zens*deg2rad)[:,None]#*zenith_pixel_size[:,None]
                 sky_response_pp[np.isnan(sky_response_pp)] = 0.
 
                 # pre-define response array per time bin to fill
@@ -437,7 +511,31 @@ class SkyResponse:
 
                 # calculate sky model count expectaion
                 self.sky_response.append(sky_response_hh*self.flux_norm)
-                    
+            print('Done.\n')
+
+        
+            print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
+            # zenith indices of response
+            zidx = np.floor(zens/dataset.pixel_size).astype(int)
+            # azimuth indices of response
+            aidx = np.floor(azis/dataset.pixel_size).astype(int)
+
+            # remove out of bounds indices
+            weights = np.ones(len(zidx))
+            zidx[zidx < 0] = 0.
+            weights[zidx < 0] = 0.
+            aidx[aidx < 0] = 0.
+            weights[aidx < 0] = 0.
+            
+            # energy normalisation matrix (???)
+            erg_mat = np.meshgrid(self.e_wid,self.e_wid)
+            
+            # weighting the response at each pointing
+            self.rmf = 0
+
+            for n in tqdm(range(len(pointings.dtpoins)),'Loop over pointings:'):
+                self.rmf += self.rsp.ZA_energy_response[zidx[n],aidx[n],:,:].T/erg_mat[0]*pointings.dtpoins[n]*weights[n]
+
 
 #            except AttributeError:
 #                print('Need to load background model to use only non-zero response (reduced) entries.')
@@ -452,14 +550,16 @@ class SkyResponse:
                 if self.n_e == 1:
                     rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins)[:,:,calc_this]
 
+
                 # multiple energy bins:
                 # choose nearest neighbour (center to center) to get response (TS: interpolation maybe later? how to if only three bands and one is a strong line?)
                 elif self.n_e > 1:
                     rsp_idx = find_nearest(self.e_cen,dataset.energies.energy_bin_cen[i])
                     # sum over initial energy axis already to get entry for measured energy with all initials possible
                     #rsp_tmp = np.sum(self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,:,:],axis=3)[:,:,:,rsp_idx]
-                    print('Using only diagonal terms (???)')
-                    rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,rsp_idx,rsp_idx]
+                    #print('Using only diagonal terms (???)')
+                    #rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e,self.n_e)[:,:,calc_this,rsp_idx,rsp_idx]
+                    rsp_tmp = self.rsp.response_grid_normed_efinal.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins,self.n_e)[:,:,:,rsp_idx]
 
                 # shouldnt happen
                 else:
@@ -468,8 +568,8 @@ class SkyResponse:
 
                 # sky response per pointing (weighted by (small) time interval in pointings to get counts
                 # zenith pixel size at time:
-                zenith_pixel_size = (np.sin((zens+dataset.pixel_size/2)*deg2rad)-np.sin((zens-dataset.pixel_size/2)*deg2rad))*analysis.dataset.pixel_size*deg2rad
-                sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=90,binsize=pixel_size)*pointings.dtpoins[:,None]
+                #zenith_pixel_size = (np.sin((zens+dataset.pixel_size/2)*deg2rad)-np.sin((zens-dataset.pixel_size/2)*deg2rad))*analysis.dataset.pixel_size*deg2rad
+                sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=60,binsize=pixel_size,lookup=lookup)*pointings.dtpoins[:,None]
 
                 # pre-define response array per time bin to fill
                 sky_response_hh = np.zeros((dataset.times.n_time_bins,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins))
@@ -482,13 +582,50 @@ class SkyResponse:
 
                 # calculate sky model count expectaion
                 sky_response_hh = sky_response_hh.reshape(dataset.times.n_time_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins)
+
+                # normalise response to total effective area?
+                sky_response_hh /= np.sum(sky_response_hh)
+                
                 self.sky_response.append(sky_response_hh)
+
+            sky_rsp_full_tmp = np.zeros((dataset.times.n_time_bins,dataset.energies.n_energy_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins))
+            for i in range(dataset.energies.n_energy_bins):
+                sky_rsp_full_tmp[:,i,:,:] = self.sky_response[i]
+
+            self.sky_response = sky_rsp_full_tmp
+
+            #print('wtf wieso nicht')
+
+            print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
+            # zenith indices of response
+            zidx = np.floor(zens/dataset.pixel_size).astype(int)
+            # azimuth indices of response
+            aidx = np.floor(azis/dataset.pixel_size).astype(int)
+                
+            # remove out of bounds indices
+            weights = np.ones(len(zidx))
+            zidx[zidx < 0] = 0.
+            weights[zidx < 0] = 0.
+            aidx[aidx < 0] = 0.
+            weights[aidx < 0] = 0.
+
+            # energy normalisation matrix (???)
+            erg_mat = np.meshgrid(self.e_wid,self.e_wid)
+
+            # weighting the response at each pointing
+            self.rmf = 0
+
+            for n in tqdm(range(len(pointings.dtpoins)),'Loop over pointings:'):
+                self.rmf += self.rsp.ZA_energy_response[zidx[n],aidx[n],:,:].T/erg_mat[0]*pointings.dtpoins[n]*weights[n]
             
                 
 
     def plot_CDS_response(self,
                           phi=None,psi=None,chi=None,
-                          zen=None,azi=None):
+                          zen=None,azi=None,erg=0):
+
+        # dimension of response
+        dim = len(self.rsp.response_grid_normed_efinal.shape)
         
         if (phi != None) & (psi != None) & (chi != None):
             print('Plotting Compton response from (phi/psi/chi) = (%.1f/%.1f/%.1f) to (Z/A):' % (phi,psi,chi))
@@ -501,10 +638,17 @@ class SkyResponse:
                                    np.rad2deg(self.rsp.fisbels.lon_cen))
         
             #print(idx)
-        
-            plt.pcolormesh(np.rad2deg(self.L_ARR),
-                           np.rad2deg(self.B_ARR),
-                           self.rsp.response_grid_normed[:,:,idx[0],idx[1]])
+            if dim == 4:
+                plt.pcolormesh(np.rad2deg(self.L_ARR),
+                               np.rad2deg(self.B_ARR),
+                               self.rsp.response_grid_normed_efinal[:,:,idx[0],idx[1]])
+            elif dim == 5:
+                plt.pcolormesh(np.rad2deg(self.L_ARR),
+                               np.rad2deg(self.B_ARR),
+                               self.rsp.response_grid_normed_efinal[:,:,idx[0],idx[1],erg])
+            else:
+                print('not a response?')
+                
             plt.colorbar(label=r'$\mathrm{ph\,cm^{2}\,sr^{-1}}$')
             plt.xlabel('Azimuth [deg]')
             plt.ylabel('Zenith [deg]')
@@ -525,11 +669,19 @@ class SkyResponse:
                                         0)
         
             #print(idx_phi)
-        
-            self.rsp.fisbels.plot_FISBEL_tessellation(values=self.rsp.response_grid_normed[idx[0],idx[1],idx_phi[0],:],
-                                                      colorbar=True,
-                                                      tiles=True,
-                                                      deg=True)
+            if dim == 4:
+                self.rsp.fisbels.plot_FISBEL_tessellation(values=self.rsp.response_grid_normed_efinal[idx[0],idx[1],idx_phi[0],:],
+                                                          colorbar=True,
+                                                          tiles=True,
+                                                          deg=True)
+            elif dim == 5:
+                self.rsp.fisbels.plot_FISBEL_tessellation(values=self.rsp.response_grid_normed_efinal[idx[0],idx[1],idx_phi[0],:,erg],
+                                                          colorbar=True,
+                                                          tiles=True,
+                                                          deg=True)
+            else:
+                print('not a response?')
+
             plt.xlabel('Chi local [deg]')
             plt.ylabel('180 deg - Psi local [deg]')
         
@@ -538,7 +690,7 @@ class SkyResponse:
 
             
 
-def get_response_with_weights(Response,zenith,azimuth,deg=True,binsize=5,cut=60.0):
+def get_response_with_weights(Response,zenith,azimuth,deg=True,binsize=5,cut=60.0,lookup=True):
     """
     Calculate response at given zenith/azimuth position of a source relative to COSI,
     using the angular distance to the 4 neighbouring pixels that overlap using a 
@@ -557,47 +709,115 @@ def get_response_with_weights(Response,zenith,azimuth,deg=True,binsize=5,cut=60.
                           false results may be returned
     :option: cut          Threshold to cut the response calculation after a certain zenith angle.
                           Default 60 deg (~ COSI FoV)
-    
+    :option: lookup       Use only pixel that got hit to calculate response (default: True)
     Returns an array of length equal the response that is input.
     """
-    # calculate the weighting for neighbouring pixels using their angular distance
-    # also returns the indices of which pixels to be used for response averaging
-    widx = get_response_weights_vector(zenith,azimuth,binsize,cut=cut)
-    # This is a vectorised function so that each entry gets its own weighting
-    # at the correct positions of the input angles ([:, None] is the same as 
-    # column-vector multiplcation of a lot of ones)
 
-    # check for negative weights and indices and remove
-    widx[1][widx[0][:,0,:] < 0] = 0.
-    widx[1][widx[0][:,1,:] < 0] = 0.
-    for i in range(4):
-        widx[0][i,0,widx[0][i,0,:] < 0] = 0.
-        widx[0][i,1,widx[0][i,1,:] < 0] = 0.
-    
-    # one energy bin
-    #print(Response.shape,len(Response.shape))
-    if len(Response.shape) < 4:
-        rsp0 = Response[widx[0][0,1,:],widx[0][0,0,:],:]*widx[1][0,:][:, None]
-        rsp1 = Response[widx[0][1,1,:],widx[0][1,0,:],:]*widx[1][1,:][:, None]
-        rsp2 = Response[widx[0][2,1,:],widx[0][2,0,:],:]*widx[1][2,:][:, None]
-        rsp3 = Response[widx[0][3,1,:],widx[0][3,0,:],:]*widx[1][3,:][:, None]
-    # with energy matrix included
-    elif len(Response.shape) >= 4:
-        rsp0 = Response[widx[0][0,1,:],widx[0][0,0,:],:,:,:]*widx[1][0,:][:, None, None, None]
-        rsp1 = Response[widx[0][1,1,:],widx[0][1,0,:],:,:,:]*widx[1][1,:][:, None, None, None]
-        rsp2 = Response[widx[0][2,1,:],widx[0][2,0,:],:,:,:]*widx[1][2,:][:, None, None, None]
-        rsp3 = Response[widx[0][3,1,:],widx[0][3,0,:],:,:,:]*widx[1][3,:][:, None, None, None]
+    if lookup == True:
+        # look up, no weighting
+        rsp_mean = get_response_from_pixelhit_vector(Response,zenith,azimuth,binsize=binsize,cut=cut)
+
     else:
-        print('How this should really not happen ...')
-        
-    # add together
-    rsp_mean = rsp0 + rsp1 + rsp2 + rsp3
+    
+        # calculate the weighting for neighbouring pixels using their angular distance
+        # also returns the indices of which pixels to be used for response averaging
+        widx = get_response_weights_vector(zenith,azimuth,binsize,cut=cut)
+        # This is a vectorised function so that each entry gets its own weighting
+        # at the correct positions of the input angles ([:, None] is the same as 
+        # column-vector multiplcation of a lot of ones)
 
+        # check for negative weights and indices and remove
+        widx[1][widx[0][:,0,:] < 0] = 0.
+        widx[1][widx[0][:,1,:] < 0] = 0.
+        for i in range(4):
+            widx[0][i,0,widx[0][i,0,:] < 0] = 0.
+            widx[0][i,1,widx[0][i,1,:] < 0] = 0.
+    
+        # one energy bin
+        #print(Response.shape,len(Response.shape))
+        if len(Response.shape) < 4:
+            rsp0 = Response[widx[0][0,1,:],widx[0][0,0,:],:]*widx[1][0,:][:, None]
+            rsp1 = Response[widx[0][1,1,:],widx[0][1,0,:],:]*widx[1][1,:][:, None]
+            rsp2 = Response[widx[0][2,1,:],widx[0][2,0,:],:]*widx[1][2,:][:, None]
+            rsp3 = Response[widx[0][3,1,:],widx[0][3,0,:],:]*widx[1][3,:][:, None]
+            # with energy matrix included
+        elif len(Response.shape) >= 4:
+            rsp0 = Response[widx[0][0,1,:],widx[0][0,0,:],:,:,:]*widx[1][0,:][:, None, None, None]
+            rsp1 = Response[widx[0][1,1,:],widx[0][1,0,:],:,:,:]*widx[1][1,:][:, None, None, None]
+            rsp2 = Response[widx[0][2,1,:],widx[0][2,0,:],:,:,:]*widx[1][2,:][:, None, None, None]
+            rsp3 = Response[widx[0][3,1,:],widx[0][3,0,:],:,:,:]*widx[1][3,:][:, None, None, None]
+        else:
+            print('How this should really not happen ...')
+        
+        rsp_mean = rsp0 + rsp1 + rsp2 + rsp3
+
+    # return response
     return rsp_mean
 
 
 
-            
+def get_response_from_pixelhit_vector(Response,zenith,azimuth,binsize=5,cut=60):
+    """
+    Get Compton response from hit pixel for each zenith/azimuth vector(!) input.
+    Binsize determines regular(!!!) sky coordinate grid in degrees.
+
+    :param: zenith        Zenith positions of the source with respect to the instrument (in deg)
+    :param: azimuth       Azimuth positions of the source with respect to the instrument (in deg)
+    :option: binsize      Default 5 deg (matching the sky dimension of the response). If set
+                          differently, make sure it matches the sky dimension as otherwise,
+                          false results may be returned
+    :option: cut          Threshold to cut the response calculation after a certain zenith angle.
+                          Default 57.4 deg (0.1 deg before last pixel reaching beyon 60 deg)
+    """
+
+    # assuming useful input:
+    # azimuthal angle is periodic in the range [0,360[
+    # zenith ranges from [0,180[
+
+    # checking azimuth range (can be exactly 360?)
+    azimuth[azimuth == 360] -= 0.01
+    
+    # check which pixel (index) was hit on regular grid
+    hit_pixel_zi = np.floor(zenith/binsize).astype(int)
+    hit_pixel_ai = np.floor(azimuth/binsize).astype(int)
+
+    #print('hit_pixel_zi',hit_pixel_zi)
+    #print('hit_pixel_ai',hit_pixel_ai)
+        
+    # and which pixel centre
+    hit_pixel_z = (hit_pixel_zi+0.5)*binsize
+    hit_pixel_a = (hit_pixel_ai+0.5)*binsize
+
+    #print('hit_pixel_z',hit_pixel_z)
+    #print('hit_pixel_a',hit_pixel_a)
+    
+    
+    # check which zeniths are beyond threshold
+    bad_idx = np.where(hit_pixel_z > cut)
+
+    # set hit pixels to output array
+    za_idx = np.array([hit_pixel_zi,hit_pixel_ai]).astype(int)
+
+    #print(za_idx)
+    # weight array includes ones and zeros only (no neighbouring pixels included)
+    # bad_idx get zeros (outside range)
+    weights = np.ones(len(zenith))
+    weights[bad_idx] = 0
+
+    # check for negative weights and indices and remove
+    weights[za_idx[0,:] < 0] = 0.
+    weights[za_idx[1,:] < 0] = 0.
+    za_idx[0,za_idx[0,:] < 0] = 0.
+    za_idx[1,za_idx[1,:] < 0] = 0.
+    
+    # get responses at pixels
+    rsp = Response[za_idx[0,:],za_idx[1,:],:]*weights[:,None]
+
+    return rsp
+
+
+
+           
 
 def get_response_weights_vector(zenith,azimuth,binsize=5,cut=57.4):
     """
@@ -709,7 +929,7 @@ def zenazi(scx_l, scx_b, scy_l, scy_b, scz_l, scz_b, src_l, src_b):
     # theta = zenith
     theta = np.rad2deg(np.arccos(costheta))
     # phi = azimuth
-    phi = np.rad2deg(np.arctan2(cosx,cosy))
+    phi = np.rad2deg(np.arctan2(cosy,cosx)) # TS January 14: you sure about that? changed y and x
     
     # make azimuth going from 0 to 360 deg
     if phi.size == 1:

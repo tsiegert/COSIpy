@@ -8,6 +8,8 @@ import matplotlib as mpl
 from tqdm.autonotebook import tqdm
 from IPython.display import HTML
 
+from fit import COSI_model_fit
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -315,9 +317,61 @@ class COSIpy:
             print('not working here ...')
 
 
-        
-    
             
+    def simulate_dataset(self,
+                         rsp,
+                         pointing,
+                         background,
+                         source_type='point source',
+                         source_position=[0.,0.],
+                         source_spectrum='powerlaw',
+                         source_parameters=[6.65e-4,-2.23],
+                         background_scaling=1.,
+                         pixel_size=6.):
+
+        # copy analysis dataset and just overwrite entries
+        self.sim_dataset = self.dataset
+
+        # simulated source values
+        self.source_type       = source_type
+        self.source_position   = source_position
+        self.source_spectrum   = source_spectrum
+        self.source_parameters = source_parameters
+
+        # simulated background scaling
+        self.background_scaling = background_scaling
+        
+        # calculate response for given input position (IRF)
+        rsp.calculate_PS_response(self.sim_dataset,
+                                  pointing,
+                                  self.source_position[0],self.source_position[1],1,
+                                  background=background,
+                                  pixel_size=pixel_size,
+                                  reduced=False)
+
+        sky_model_IRF = rsp.sky_response
+        
+        # calculate response for given input spectrum (RMF)
+        sky_model_RMF = COSI_model_fit(self.source_parameters,
+                                       self.sim_dataset.energies.energy_bin_cen,0,
+                                       self.sim_dataset.energies.energy_bin_wid*2,0,
+                                       rsp.rmf.T,rsp.e_min,rsp.e_max,
+                                       self.source_spectrum,
+                                       eval=True)
+
+        # combine sky
+        self.sky_model_tot = sky_model_IRF*(sky_model_RMF*self.sim_dataset.times.total_time*rsp.e_wid)[None,:,None,None]
+
+        # background model (scaled to the initial data set
+        # might want to change later to counts per second and time variability, etc.
+        self.bg_model_tot = self.background_scaling*background.bg_model
+
+        # drawing a Poisson
+        self.sim_dataset.binned_data = np.random.poisson(self.bg_model_tot + self.sky_model_tot)
+
+
+        
+        
     @property
     def available_attributes(self):
         """
@@ -450,7 +504,8 @@ class dataset(COSIpy):
         self.times.times_max   = self.times.times_edges[1:]
         self.times.times_cen   = 0.5*(self.times.times_max+self.times.times_min)
         self.times.times_wid   = 0.5*(self.times.times_max-self.times.times_min)
-
+        # total time for complete normalisation
+        self.times.total_time  = np.diff(self.times.times_edges[[0,-1]])[0]
 
 
 
@@ -540,8 +595,115 @@ class dataset(COSIpy):
 
 
 
+    def bin_for_angles(self,binned_array=None):
+        """
+        extract phi, psi, and chi information per time and energy
+        """
+
+        # temporary angle bin definition
+        # chi
+        ll = self.fisbels.lon_cen
+        dll = self.fisbels.lon_wid
+
+        # psi
+        bb = self.fisbels.lat_cen
+        dbb = self.fisbels.lat_wid
+
+        # phi
+        pp = self.phis.phi_cen
+        dpp = self.phis.phi_wid
+        n_pp = len(pp)
+        
+        # find indices for psi and chi
+        uniq_bb = np.unique(bb)
+        n_bb = len(uniq_bb)
+        bb_idx = []
+        for i in range(n_bb):
+            bb_idx.append(np.where(bb == uniq_bb[i])[0])
+
+        uniq_ll = np.unique(ll)
+        n_ll = len(uniq_ll)
+        ll_idx = []
+        for i in range(n_ll):
+            ll_idx.append(np.where(ll == uniq_ll[i])[0])
 
 
+        # if reduced for phi
+        """
+        if self.reduced == True:
+            pp_idx = []
+            for i in range(len(pp)):
+                pp_idx.append(np.where(cds_idx[1] == i)[0])
+        """
+
+        if np.any(binned_array == None):
+        
+            self.phi_binned = np.zeros((self.times.n_time_bins,
+                                        self.energies.n_energy_bins,
+                                        n_pp))
+
+            for t in range(self.times.n_time_bins):
+                for e in range(self.energies.n_energy_bins):
+                    for i in range(n_pp):
+                        self.phi_binned[t,e,i] = np.sum(self.binned_data[t,e,i,:])
+                        
+                    
+            self.psi_binned = np.zeros((self.times.n_time_bins,
+                                        self.energies.n_energy_bins,
+                                        n_bb))
+
+            for t in range(self.times.n_time_bins):
+                for e in range(self.energies.n_energy_bins):
+                    for i in range(n_bb):
+                        self.psi_binned[t,e,i] = np.sum(self.binned_data[t,e,:,bb_idx[i]])
+
+                    
+            self.chi_binned = np.zeros((self.times.n_time_bins,
+                                        self.energies.n_energy_bins,
+                                        n_ll))
+
+            for t in range(self.times.n_time_bins):
+                for e in range(self.energies.n_energy_bins):
+                    for i in range(n_ll):
+                        self.chi_binned[t,e,i] = np.sum(self.binned_data[t,e,:,ll_idx[i]])
+
+
+        else:
+
+            phi_binned = np.zeros((self.times.n_time_bins,
+                                   self.energies.n_energy_bins,
+                                   n_pp))
+
+            for t in range(self.times.n_time_bins):
+                for e in range(self.energies.n_energy_bins):
+                    for i in range(n_pp):
+                        phi_binned[t,e,i] = np.sum(binned_array[t,e,i,:])
+
+
+            psi_binned = np.zeros((self.times.n_time_bins,
+                                   self.energies.n_energy_bins,
+                                   n_bb))
+
+            for t in range(self.times.n_time_bins):
+                for e in range(self.energies.n_energy_bins):
+                    for i in range(n_bb):
+                        psi_binned[t,e,i] = np.sum(binned_array[t,e,:,bb_idx[i]])
+
+
+            chi_binned = np.zeros((self.times.n_time_bins,
+                                   self.energies.n_energy_bins,
+                                   n_ll))
+
+            for t in range(self.times.n_time_bins):
+                for e in range(self.energies.n_energy_bins):
+                    for i in range(n_ll):
+                        chi_binned[t,e,i] = np.sum(binned_array[t,e,:,ll_idx[i]])
+
+
+            return phi_binned, psi_binned, chi_binned
+
+
+                        
             
     def plot_raw_spectrum(self,mode='total'):
         """
@@ -1062,12 +1224,40 @@ class BG():
         if self.bg_mode == 'default':
             print('Reading in flight-average background response for 5 deg CDS binning ...')
             self.default_bg_response_file = 'flight_bg_all_v1_fine.npz'
+            
         elif self.bg_mode == 'default 3deg':
             print('Reading in flight-average background response for 3 deg CDS binning ...')
             self.default_bg_response_file = 'flight_bg_all_v1_fine_3deg.npz'
+            
         elif self.bg_mode == 'default 6deg':
             print('Reading in flight-average background response for 6 deg CDS binning ...')
             self.default_bg_response_file = 'flight_bg_all_v1_fine_6deg.npz'
+            
+        elif self.bg_mode == 'sim 5deg':
+            print('Reading in simulated Ling-model (1973) background response for 5 deg CDS binning ...')
+            self.default_bg_response_file = 'LingModel_bg_all_v1_fine_old.npz'
+            
+        elif self.bg_mode == 'sim 6deg':
+            print('Reading in simulated Ling-model (1973) background response for 6 deg CDS binning ...')
+            self.default_bg_response_file = 'LingModel_bg_all_v1_fine_6deg_old.npz'
+            
+        elif self.bg_mode == 'sim 5deg despina':
+            print('Reading in simulated Ling-model (1973) background response for 5 deg CDS binning from despina only...')
+            self.default_bg_response_file = 'LingModel_bg_all_v1_fine_despina_only.npz'
+            
+        elif self.bg_mode == 'sim 6deg despina':
+            print('Reading in simulated Ling-model (1973) background response for 6 deg CDS binning from despina only...')
+            self.default_bg_response_file = 'LingModel_bg_all_v1_fine_6deg_despina_only.npz'
+
+        elif self.bg_mode == 'sim 5deg royal':
+            print('Reading in simulated Ling-model (1973) background response for 5 deg CDS binning from royal only...')
+            self.default_bg_response_file = 'LingModel_bg_all_v1_fine_royal_only.npz'
+            
+        elif self.bg_mode == 'sim 6deg royal':
+            print('Reading in simulated Ling-model (1973) background response for 6 deg CDS binning from royal only...')
+            self.default_bg_response_file = 'LingModel_bg_all_v1_fine_6deg_royal_only.npz'
+        
+            
         else:
             print('Using background mode: '+self.bg_mode)
 
