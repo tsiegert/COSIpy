@@ -422,13 +422,16 @@ class SkyResponse:
                               reduced=True,
                               pixel_size=5.,
                               background=None,
-                              lookup=True):
+                              lookup=True,
+                              verbose=False):
         self.l_src = l_src
         self.b_src = b_src
         self.flux_norm = flux_norm
+        self.verbose = verbose
 
-
-        print('Calculating zeniths and azimuths for all pointings ...')
+        if self.verbose:
+            print('Calculating zeniths and azimuths for all pointings ...')
+            
         zens,azis = zenazi(pointings.xpoins[:,0],pointings.xpoins[:,1],
                            pointings.ypoins[:,0],pointings.ypoins[:,1],
                            pointings.zpoins[:,0],pointings.zpoins[:,1],
@@ -436,10 +439,10 @@ class SkyResponse:
 
         #print('zens',zens)
         #print('azis',azis)
-        
-        print('Done.\n')
+        if self.verbose:
+            print('Done.\n')
 
-        print('Calculating CDS count expectations for all bins ...')
+            print('Calculating CDS count expectations for all bins ...')
         # initialise sky response list to include all energies
         self.sky_response = []
 
@@ -449,8 +452,9 @@ class SkyResponse:
                     
                 # reshape background model to reduce CDS if possible
                 # this combines the 3 CDS angles into a 1D array for all times at the chosen energy
-                bg_tmp = background.bg_model[:,i,:,:].reshape(dataset.times.n_time_bins,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins)
-
+                #bg_tmp = background.bg_model[:,i,:,:].reshape(dataset.times.n_time_bins,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins)
+                bg_tmp = background.bg_model[:,i,:,:].reshape(dataset.times.n_ph,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins)
+                
                 # get indices of where no entries are there at all (will always be zero, so can be ignored)
                 calc_this = np.where(np.sum(bg_tmp,axis=0) != 0)[0]
 
@@ -485,8 +489,9 @@ class SkyResponse:
                     
                 # shouldnt happen
                 else:
-                    print('Something went wrong ...')
-
+                    if self.verbose:
+                        print('Something went wrong ...')
+                    
 
                 # sky response per pointing (weighted by (small) time interval in pointings to get counts
                 # zenith pixel size at time:
@@ -497,11 +502,14 @@ class SkyResponse:
                 sky_response_pp[np.isnan(sky_response_pp)] = 0.
 
                 # pre-define response array per time bin to fill
-                sky_response_hh = np.zeros((dataset.times.n_time_bins,len(calc_this)))
+                #sky_response_hh = np.zeros((dataset.times.n_time_bins,len(calc_this)))
+                sky_response_hh = np.zeros((dataset.times.n_ph,len(calc_this)))
+    
                 # loop until all defined time bins of previous definition are included
-                for c in range(dataset.times.n_time_bins):
-                    cdx = np.where((pointings.cdtpoins > dataset.times.times_min[c]) &
-                                   (pointings.cdtpoins <= dataset.times.times_max[c]))[0]
+                #for c in range(dataset.times.n_time_bins):
+                for c in range(dataset.times.n_ph):
+                    cdx = np.where((pointings.cdtpoins > dataset.times.times_min[dataset.times.n_ph_dx[c]]) &
+                                   (pointings.cdtpoins <= dataset.times.times_max[dataset.times.n_ph_dx[c]]))[0]
                         
                     sky_response_hh[c,:] = np.sum(sky_response_pp[cdx,:],axis=0)
 
@@ -511,15 +519,17 @@ class SkyResponse:
 
                 # calculate sky model count expectaion
                 self.sky_response.append(sky_response_hh*self.flux_norm)
-            print('Done.\n')
 
-        
-            print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
+            if self.verbose:
+                print('Done.\n')
+            
+            if self.verbose:
+                print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
             # zenith indices of response
             zidx = np.floor(zens/dataset.pixel_size).astype(int)
             # azimuth indices of response
             aidx = np.floor(azis/dataset.pixel_size).astype(int)
-
+            
             # remove out of bounds indices
             weights = np.ones(len(zidx))
             zidx[zidx < 0] = 0.
@@ -541,7 +551,8 @@ class SkyResponse:
 #                print('Need to load background model to use only non-zero response (reduced) entries.')
 
         else:
-            print('Your computer will explode.')
+            if self.verbose:
+                print('Your computer will explode.')
 
             for i in range(dataset.energies.n_energy_bins):
 
@@ -563,7 +574,8 @@ class SkyResponse:
 
                 # shouldnt happen
                 else:
-                    print('Something went wrong ...')
+                    if self.verbose:
+                        print('Something went wrong ...')
 
 
                 # sky response per pointing (weighted by (small) time interval in pointings to get counts
@@ -572,23 +584,29 @@ class SkyResponse:
                 sky_response_pp = get_response_with_weights(rsp_tmp,zens,azis,cut=60,binsize=pixel_size,lookup=lookup)*pointings.dtpoins[:,None]
 
                 # pre-define response array per time bin to fill
-                sky_response_hh = np.zeros((dataset.times.n_time_bins,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins))
+                #sky_response_hh = np.zeros((dataset.times.n_time_bins,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins))
+                sky_response_hh = np.zeros((dataset.times.n_ph,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins))
+                
                 # loop until all defined time bins of previous definition are included
-                for c in range(dataset.times.n_time_bins):
-                    cdx = np.where((pointings.cdtpoins > dataset.times.times_min[c]) &
-                                   (pointings.cdtpoins <= dataset.times.times_max[c]))[0]
+                #for c in range(dataset.times.n_time_bins):
+                for c in range(dataset.times.n_ph):
+                    cdx = np.where((pointings.cdtpoins > dataset.times.times_min[dataset.times.n_ph_dx[c]]) &
+                                   (pointings.cdtpoins <= dataset.times.times_max[dataset.times.n_ph_dx[c]]))[0]
 
                     sky_response_hh[c,:] = np.sum(sky_response_pp[cdx,:],axis=0)
 
                 # calculate sky model count expectaion
-                sky_response_hh = sky_response_hh.reshape(dataset.times.n_time_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins)
-
+                #sky_response_hh = sky_response_hh.reshape(dataset.times.n_time_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins)
+                sky_response_hh = sky_response_hh.reshape(dataset.times.n_ph,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins)
+                
                 # normalise response to total effective area?
                 sky_response_hh /= np.sum(sky_response_hh)
                 
                 self.sky_response.append(sky_response_hh)
 
-            sky_rsp_full_tmp = np.zeros((dataset.times.n_time_bins,dataset.energies.n_energy_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins))
+            #sky_rsp_full_tmp = np.zeros((dataset.times.n_time_bins,dataset.energies.n_energy_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins))
+            sky_rsp_full_tmp = np.zeros((dataset.times.n_ph,dataset.energies.n_energy_bins,self.rsp.n_phi_bins,self.rsp.n_fisbel_bins))
+            
             for i in range(dataset.energies.n_energy_bins):
                 sky_rsp_full_tmp[:,i,:,:] = self.sky_response[i]
 
@@ -596,7 +614,8 @@ class SkyResponse:
 
             #print('wtf wieso nicht')
 
-            print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
+            if self.verbose:
+                print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
             # zenith indices of response
             zidx = np.floor(zens/dataset.pixel_size).astype(int)
             # azimuth indices of response
@@ -839,10 +858,12 @@ def get_response_weights_vector(zenith,azimuth,binsize=5,cut=57.4):
     # assuming useful input:
     # azimuthal angle is periodic in the range [0,360[
     # zenith ranges from [0,180[ 
-
+    # checking azimuth range (can be exactly 360?)
+    azimuth[azimuth == 360] -= 0.01
+    
     # check which pixel (index) was hit on regular grid
-    hit_pixel_zi = np.floor(zenith/binsize)
-    hit_pixel_ai = np.floor(azimuth/binsize)
+    hit_pixel_zi = np.floor(zenith/binsize).astype(int)
+    hit_pixel_ai = np.floor(azimuth/binsize).astype(int)
 
     # and which pixel centre
     hit_pixel_z = (hit_pixel_zi+0.5)*binsize

@@ -327,7 +327,8 @@ class COSIpy:
                          source_spectrum='powerlaw',
                          source_parameters=[6.65e-4,-2.23],
                          background_scaling=1.,
-                         pixel_size=6.):
+                         pixel_size=6.,
+                         lookup=True):
 
         # copy analysis dataset and just overwrite entries
         self.sim_dataset = self.dataset
@@ -347,7 +348,8 @@ class COSIpy:
                                   self.source_position[0],self.source_position[1],1,
                                   background=background,
                                   pixel_size=pixel_size,
-                                  reduced=False)
+                                  reduced=False,
+                                  lookup=lookup)
 
         sky_model_IRF = rsp.sky_response
         
@@ -366,7 +368,7 @@ class COSIpy:
         # might want to change later to counts per second and time variability, etc.
         self.bg_model_tot = self.background_scaling*background.bg_model
 
-        # drawing a Poisson
+        # drawing a Poisson sample
         self.sim_dataset.binned_data = np.random.poisson(self.bg_model_tot + self.sky_model_tot)
 
 
@@ -468,19 +470,39 @@ class dataset(COSIpy):
                                 Default: 3600 (in units of seconds)
         """
 
+        #print(isinstance(time_bin_size, (list, tuple, np.ndarray))
+        
         # general time bin size
+        # TS: January 25: can be set to one number or general shape
+        #if not isinstance(time_bin_size, (list, tuple, np.ndarray)):
         self.init_time_bin_size = time_bin_size
+        #print('hut')
+        #break
+        #else:
+        #    self.init_time_bin_size = np.array(time_bin_size)
+
+        #print(self.init_time_bin_size)
         
         # number of time bins in data set
-        # last time bin will probably show less counts as data set might not be equally-spaced
+        # last time bin will probably show less counts as data set might not be equally-spaced; TS 25 January: this is taken care of
+        # TS 25 January: need to check if one time bin size for all or different sizes
+        #if not isinstance(self.init_time_bin_size, (list, tuple, np.ndarray)):
         self.n_time_bins = int(np.ceil(np.diff(minmax(self.data['TimeTags']))/self.init_time_bin_size))
+        #else:
+        #    self.n_time_bins = len(self.init_time_bin_size)
 
         # time conversions seconds to bin-size
+        #if not isinstance(self.init_time_bin_size, (list, tuple, np.ndarray)):
+        #s2b = np.repeat(1./self.init_time_bin_size,self.n_time_bins)
+        #else:
         s2b = 1./self.init_time_bin_size
 
         # calculate last time bin interval
         # ( how much is left in the data set inside the last bin )
+        #if not isinstance(self.init_time_bin_size, (list, tuple, np.ndarray)):
         self.last_bin_size = np.diff(minmax(self.data['TimeTags']))[0]-(self.n_time_bins-1)/s2b
+        #else:
+        #    self.last_bin_size = self.init_time_bin_size[-1]
 
         # fill data (as formatted per time tagged of individual time bins of size time_bin_size)
         self.data_time_tagged = []
@@ -505,7 +527,12 @@ class dataset(COSIpy):
         self.times.times_cen   = 0.5*(self.times.times_max+self.times.times_min)
         self.times.times_wid   = 0.5*(self.times.times_max-self.times.times_min)
         # total time for complete normalisation
-        self.times.total_time  = np.diff(self.times.times_edges[[0,-1]])[0]
+        # self.times.total_time  = np.diff(self.times.times_edges[[0,-1]])[0]
+        # need to take into account empty time bins
+        self.times.n_ph_t = np.array([len(self.data_time_tagged[i]['Indices']) for i in range(self.times.n_time_bins)])
+        self.times.n_ph_dx = np.where(self.times.n_ph_t != 0)[0]
+        self.times.n_ph   = len(self.times.n_ph_dx)
+        self.times.total_time  = 2*np.sum(self.times.times_wid[self.times.n_ph_dx])
 
 
 
@@ -551,41 +578,45 @@ class dataset(COSIpy):
         try:
     
             # init data array
-            self.binned_data = np.zeros((self.times.n_time_bins,
+            self.binned_data = np.zeros((self.times.n_ph,#self.times.n_time_bins,
                                          self.energies.n_energy_bins,
                                          self.phis.n_phi_bins,
                                          self.fisbels.n_fisbel_bins))
-    
+
+            ph_dx = 0
             # loop over defined time bins
             for t in tqdm(range(self.times.n_time_bins),desc='Loop over time bins:'):
 
-                # use indexed photons for specific time interval
-                idx_tmp = self.data_time_tagged[t]['Indices']
+                if self.times.n_ph_t[t] != 0:
+                
+                    # use indexed photons for specific time interval
+                    idx_tmp = self.data_time_tagged[t]['Indices']
 
-                # temporary CDS indexed for time interval
-                phi_tmp = self.data['Phi'][idx_tmp]
-                psi_tmp = self.data['Psi local'][idx_tmp]
-                chi_tmp = self.data['Chi local'][idx_tmp]
-                # and energies for indexed time interval
-                erg_tmp = self.data['Energies'][idx_tmp]
+                    # temporary CDS indexed for time interval
+                    phi_tmp = self.data['Phi'][idx_tmp]
+                    psi_tmp = self.data['Psi local'][idx_tmp]
+                    chi_tmp = self.data['Chi local'][idx_tmp]
+                    # and energies for indexed time interval
+                    erg_tmp = self.data['Energies'][idx_tmp]
+                    
+                    # because FISBEL is not monotonic in both dimensions, loop over FISBEL bins
+                    for f in tqdm(range(self.n_fisbel_bins),leave=False):
 
-                # because FISBEL is not monotonic in both dimensions, loop over FISBEL bins
-                for f in tqdm(range(self.n_fisbel_bins),leave=False):
-
-                    # select 2D pixel range where photons fall in
-                    fisbel_idx_tmp = np.where((chi_tmp >= self.fisbels.lon_min[f]) &
-                                              (chi_tmp <  self.fisbels.lon_max[f]) &
-                                              (psi_tmp >= self.fisbels.lat_min[f]) &
-                                              (psi_tmp <  self.fisbels.lat_max[f]))[0]
+                        # select 2D pixel range where photons fall in
+                        fisbel_idx_tmp = np.where((chi_tmp >= self.fisbels.lon_min[f]) &
+                                                  (chi_tmp <  self.fisbels.lon_max[f]) &
+                                                  (psi_tmp >= self.fisbels.lat_min[f]) &
+                                                  (psi_tmp <  self.fisbels.lat_max[f]))[0]
                         
-                    # multi-D histogramming of the events in energy and phi
-                    tmp_hist = np.histogramdd(np.array([erg_tmp[fisbel_idx_tmp],
-                                                        phi_tmp[fisbel_idx_tmp]]).T,
-                                              bins=np.array([self.energies.energy_bin_edges,
-                                                             self.phis.phi_edges]))#,
+                        # multi-D histogramming of the events in energy and phi
+                        tmp_hist = np.histogramdd(np.array([erg_tmp[fisbel_idx_tmp],
+                                                            phi_tmp[fisbel_idx_tmp]]).T,
+                                                  bins=np.array([self.energies.energy_bin_edges,
+                                                                 self.phis.phi_edges]))#,
 
-                    # fill into binned_data array
-                    self.binned_data[t,:,:,f] = tmp_hist[0]
+                        # fill into binned_data array
+                        self.binned_data[ph_dx,:,:,f] = tmp_hist[0]
+                    ph_dx += 1
 
                     
         except AttributeError:
@@ -712,13 +743,14 @@ class dataset(COSIpy):
         
         try:
 
-            if (self.binned_data.shape[0] != self.times.n_time_bins):
+            #if (self.binned_data.shape[0] != self.times.n_time_bins):
+            if (self.binned_data.shape[0] != self.times.n_ph):
                 print('The binning was updated since the last call! Run time_binning_tags() for your current binning.')
             else:
                 
                 if mode == 'total':
                     self.energies.energy_spec_data = np.sum(self.binned_data,axis=(0,2,3)).reshape(1,self.energies.n_energy_bins)
-                    self.times.total_time = np.sum(self.times.times_wid*2)
+                    #self.times.total_time = np.sum(self.times.times_wid*2)
                     self.energies.energy_spec_data /= self.times.total_time
                 elif mode == 'all':
                     self.energies.energy_spec_data = np.sum(self.binned_data,axis=(2,3))
@@ -784,13 +816,14 @@ class dataset(COSIpy):
         
         try:
 
-            if (self.binned_data.shape[0] != self.times.n_time_bins):
+            #if (self.binned_data.shape[0] != self.times.n_time_bins):
+            if (self.binned_data.shape[0] != self.times.n_ph):
                 print('The binning was updated since the last call! Run time_binning_tags() for your current binning.')
             else:
 
                 # sum over angles to get only time and energy array
                 self.lc_all = np.sum(self.binned_data,axis=(2,3))
-                self.lc_all /= (self.times.times_wid[:,None]*2)
+                self.lc_all = self.lc_all/self.times.total_time
             
                 if mode == 'total':
                     self.light_curve = np.sum(self.lc_all,axis=1)
@@ -800,7 +833,7 @@ class dataset(COSIpy):
                     self.light_curve = self.lc_all[:,mode]
                 
                 fig, ax = plt.subplots(1,1,figsize=(8,6))
-                ax.step(self.times.times_cen,self.light_curve,where='mid')
+                ax.step(self.times.times_cen[self.times.n_ph_dx],self.light_curve,where='mid')
                 ax.set_xlabel('Seconds since UNIX second '+str('%.2f' % self.data['TimeTags'][0])+' [s]')
                 ax.set_ylabel('Count rate [cnts/s]')
 
@@ -1218,7 +1251,7 @@ class BG():
 
         self.bg_mode = mode
         self.filename = filename
-        self.n_time_bins = dataset.times.n_time_bins
+        self.n_time_bins = dataset.times.n_ph#dataset.times.n_time_bins
         self.times_wid = dataset.times.times_wid*2 # half-widths * 2
 
         if self.bg_mode == 'default':

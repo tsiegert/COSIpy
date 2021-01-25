@@ -84,7 +84,7 @@ class fit():
             
             # reshape count data to reduce CDS if possible
             # this combines the 3 CDS angles into a 1D array for all times at the chosen energy
-            yp_tmp = self.dataset.binned_data[:,i,:,:].reshape(self.dataset.times.n_time_bins,
+            yp_tmp = self.dataset.binned_data[:,i,:,:].reshape(self.dataset.times.n_ph,#self.dataset.times.n_time_bins,
                                                           self.background.bg_model.shape[2]*self.background.bg_model.shape[3])
     
             # reshape count data grid the same way as backgrorund and choose only non-zero indices
@@ -236,7 +236,7 @@ class fit():
                 pickle.dump(self.model, f)
                 
     
-    def MAP_solution(self,guess=1.0,method='LBFGS',scipy=False):
+    def MAP_solution(self,guess=1.0,method='LBFGS',scipy=False,ebins='all'):
         """
         Performs optimisation of the joint posterior distribution and returns Median A-Posteriori (MAP) point estimate.
         Returns no error bars and serves as quick cross check or for calls to likelihood ratio tests.
@@ -252,53 +252,67 @@ class fit():
                 nll = lambda *args: -COSImodfit(*args)
             else:
                 nll = lambda *args: -COSImodfit_bgonly(*args)
-                
+
+        if np.any(ebins == 'all'):
+            ebins = np.arange(self.dataset.energies.n_energy_bins)            
         
         # loop over energy bins
         for i in tqdm(range(self.dataset.energies.n_energy_bins),desc='Loop over energy bins:'):
-            if self.verbose:
-                print('Start optimising energy bin '+str(i+1)+'/'+str(self.dataset.energies.n_energy_bins)+'...')
-                print('\nEnergy range: '+str(self.dataset.energies.energy_bin_min[i])+'-'+str(self.dataset.energies.energy_bin_max[i])+' keV ...')
+
+            if ebins[i] == i:
                 
-            # not necessary in general, but good for quicklook MAP estimate
-            init = {}
-            if not self.bg_only:
-                init['flux'] = np.array([np.sum(self.data_per_energy_bin[i]['y'])*0.05])
-                init['Abg'] = np.repeat(1.01,self.background.Ncuts)
-            else:
-                init['Abg'] = np.repeat(1.01,self.background.Ncuts)
-
-
-            if scipy == False:
-                # optimiising the model
-                res = self.model.optimizing(data=self.data_per_energy_bin[i],
-                                           verbose=False,init=init,as_vector=False,algorithm=method)#,tol_rel_grad=1e4)
-            else:
+                if self.verbose:
+                    print('Start optimising energy bin '+str(i+1)+'/'+str(self.dataset.energies.n_energy_bins)+'...')
+                    print('\nEnergy range: '+str(self.dataset.energies.energy_bin_min[i])+'-'+str(self.dataset.energies.energy_bin_max[i])+' keV ...')
+                
+                # not necessary in general, but good for quicklook MAP estimate
+                init = {}
                 if not self.bg_only:
-                    res = op.minimize(nll,
-                                      [np.sum(self.data_per_energy_bin[i]['y'])*0.015,1.],
-                                      args=(self.data_per_energy_bin[i]['y'], #data
-                                            self.data_per_energy_bin[i]['conv_sky'].ravel(), # sky model
-                                            self.data_per_energy_bin[i]['bg_model'].ravel()), # bg model
-                                      options={'gtol': 1e-4})
+                    init['flux'] = np.array([np.sum(self.data_per_energy_bin[i]['y'])*0.05])
+                    init['Abg'] = np.repeat(1.01,self.background.Ncuts)
                 else:
-                    res = op.minimize(nll,
-                                      [np.sum(self.data_per_energy_bin[i]['y'])*0.015,1.],
-                                      args=(self.data_per_energy_bin[i]['y'], #data
-                                            self.data_per_energy_bin[i]['bg_model'].ravel()), # bg model
-                                      options={'gtol': 1e-4})
-                
+                    init['Abg'] = np.repeat(1.01,self.background.Ncuts)
 
-            # append the result
-            self.fit_pars_map.append(res)
 
-            # calculate the flux
-            if not self.bg_only:
-                norm_tmp = self.dataset.energies.energy_bin_wid[i]*2/self.response.flux_norm*self.dataset.times.total_time
                 if scipy == False:
-                    self.diff_rate_map[i] = self.fit_pars_map[i]['par']['flux']/norm_tmp
+                    # optimiising the model
+                    res = self.model.optimizing(data=self.data_per_energy_bin[i],
+                                                verbose=False,init=init,as_vector=False,algorithm=method)#,tol_rel_grad=1e4)
                 else:
-                    self.diff_rate_map[i] = self.fit_pars_map[i].x[0]/norm_tmp
+                    if not self.bg_only:
+                        res = op.minimize(nll,
+                                          [np.sum(self.data_per_energy_bin[i]['y'])*0.015,1.],
+                                          args=(self.data_per_energy_bin[i]['y'], #data
+                                                self.data_per_energy_bin[i]['conv_sky'].ravel(), # sky model
+                                                self.data_per_energy_bin[i]['bg_model'].ravel()), # bg model
+                                          options={'gtol': 1e-4})
+                    else:
+                        res = op.minimize(nll,
+                                          [np.sum(self.data_per_energy_bin[i]['y'])*0.015,1.],
+                                          args=(self.data_per_energy_bin[i]['y'], #data
+                                                self.data_per_energy_bin[i]['bg_model'].ravel()), # bg model
+                                          options={'gtol': 1e-4})
+                    
+
+                # append the result
+                self.fit_pars_map.append(res)
+
+                # calculate the flux
+                if not self.bg_only:
+                    norm_tmp = self.dataset.energies.energy_bin_wid[i]*2/self.response.flux_norm*self.dataset.times.total_time
+                    if scipy == False:
+                        #self.diff_rate_map[i] = self.fit_pars_map[i]['par']['flux']/norm_tmp
+                        self.diff_rate_map[i] = res['par']['flux']/norm_tmp
+                    else:
+                        #self.diff_rate_map[i] = self.fit_pars_map[i].x[0]/norm_tmp
+                        self.diff_rate_map[i] = res.x[0]/norm_tmp
+                        
+            else:
+
+                if self.verbose:
+                    print('Skipping energy range: '+str(self.dataset.energies.energy_bin_min[i])+'-'+str(self.dataset.energies.energy_bin_max[i])+' keV ...')
+                # append a zero result
+                #self.fit_pars_map.append(0)
             
             
     def fit(self,iters=1000,pars=['flux','Abg'],use_emcee=False):
@@ -527,7 +541,7 @@ class fit():
         if with_systematics == True:
             syst_scl = self.systematics
         else:
-            syst_scl = np.ones(self.e_select)
+            syst_scl = np.ones(self.n_e)
             
         # here standard emcee workflow
         ndim, nwalkers = self.n_par, self.n_par*4
@@ -865,7 +879,7 @@ class fit():
         return ax
         
 
-    def TS_map(self,grid,scipy=False):
+    def TS_map(self,grid,scipy=False,ebins='all',lookup=True):
         """
         TS: still experimental
         Creating a test statistics map from optimising a grid of point source positions.
@@ -875,7 +889,16 @@ class fit():
         TS: will need to include plotting routine for illustrate the results of this call
         """
 
-        n_e_tmp = self.dataset.energies.n_energy_bins
+        if np.any(ebins == 'all'):
+            n_e_tmp = self.dataset.energies.n_energy_bins
+        else:
+            n_e_tmp = 0
+            for e in range(len(ebins)):
+                if e == ebins[e]:
+                    n_e_tmp += 1
+
+        print(n_e_tmp)
+        
         
         # tested grid
         self.grid = grid
@@ -891,7 +914,7 @@ class fit():
         # BG-only optimisation
         print('Fitting background only...')
         #bg_only_results.fit()
-        bg_only_results.MAP_solution(scipy=scipy)
+        bg_only_results.MAP_solution(scipy=scipy,ebins=ebins)
 
         # save BG-only result
         if scipy == False:
@@ -903,7 +926,7 @@ class fit():
         # init array for saving results
         self.TS_vals   = np.zeros((n_e_tmp,len(self.grid[0].ravel())))
         self.flux_vals = np.zeros((n_e_tmp,len(self.grid[0].ravel())))
-        self.bg_vals   = np.zeros((n_e_tmp,len(self.grid[0].ravel())))
+        self.bg_vals   = np.zeros((n_e_tmp,len(self.grid[0].ravel()),self.background.Ncuts))
         
         # loop over grid points
         for i in tqdm(range(len(self.grid[0].ravel())),desc='Loop over grid points:'):
@@ -919,7 +942,8 @@ class fit():
                                                 self.pointings,
                                                 self.grid[0].ravel()[i],self.grid[1].ravel()[i],1,
                                                 background=self.background,
-                                                pixel_size=self.dataset.pixel_size)
+                                                pixel_size=self.dataset.pixel_size,
+                                                lookup=lookup)
 
             # if something with response entries == zero und dann checken ob es ausserhalb des FoV ist
 
@@ -935,18 +959,24 @@ class fit():
                 # fit this position
                 #tmp_results.fit()
                 if scipy == False:
-                    tmp_results.MAP_solution()
+                    tmp_results.MAP_solution(ebins=ebins)
                     # save result if not failed
                     #self.TS_vals[:,i] = np.array([np.mean(tmp_results.fit_pars[e]['lp__']) for e in range(9)])#fit_pars_map[0]['value']
                     self.TS_vals[:,i] = np.array([tmp_results.fit_pars_map[e]['value']*2 for e in range(n_e_tmp)])
                     self.flux_vals[:,i] = np.array([tmp_results.fit_pars_map[e]['par']['flux'] for e in range(n_e_tmp)])
-                    self.bg_vals[:,i] = np.array([tmp_results.fit_pars_map[e]['par']['Abg'] for e in range(n_e_tmp)])
+                    if self.background.Ncuts > 1:
+                        self.bg_vals[:,i,:] = np.array([tmp_results.fit_pars_map[e]['par']['Abg'] for e in range(n_e_tmp)])
+                    else:
+                        self.bg_vals[:,i,0] = np.array([tmp_results.fit_pars_map[e]['par']['Abg'] for e in range(n_e_tmp)])
                 else:
-                    tmp_results.MAP_solution(scipy=scipy)
+                    tmp_results.MAP_solution(scipy=scipy,ebins=ebins)
                     self.TS_vals[:,i] = np.array([tmp_results.fit_pars_map[e].fun for e in range(n_e_tmp)])
                     self.flux_vals[:,i] = np.array([tmp_results.fit_pars_map[e].x[0] for e in range(n_e_tmp)])
-                    self.bg_vals[:,i] = np.array([tmp_results.fit_pars_map[e].x[1] for e in range(n_e_tmp)])
-                
+                    if self.background.Ncuts > 1:
+                        self.bg_vals[:,i,:] = np.array([tmp_results.fit_pars_map[e].x[1] for e in range(n_e_tmp)])
+                    else:
+                        self.bg_vals[:,i,0] = np.array([tmp_results.fit_pars_map[e].x[1] for e in range(n_e_tmp)])
+                    
             except RuntimeError:
                 # if fit failed (zeros or something else) through RuntimeError
                 if self.verbose:
@@ -954,13 +984,19 @@ class fit():
                 self.TS_vals[:,i] = np.nan
         
         
-    def plot_TS_map_results(self,mode='all',l_src=None,b_src=None):
+    def plot_TS_map_results(self,mode='all',l_src=None,b_src=None,ebins='all'):
         """
         requires TS_map to have worked once
         """
-
+        
         # tmporary energy bin number
-        n_e_tmp = self.dataset.energies.n_energy_bins
+        if np.any(ebins == 'all'):
+            n_e_tmp = self.dataset.energies.n_energy_bins
+        else:
+            n_e_tmp = 0
+            for e in range(len(ebins)):
+                if e == ebins[e]:
+                    n_e_tmp += 1
         edges_tmp = self.dataset.energies.energy_bin_edges
         
         # temporary coordinate grid arrays
@@ -994,7 +1030,14 @@ class fit():
                 plt.colorbar(pc,ax=ax.ravel()[i])
                 if (l_src != None) & (b_src != None):
                     ax.ravel()[i].plot(l_src,b_src,marker='*',markersize=15,color='cyan',linestyle='')
-                ax.ravel()[i].set_title('%i-%i keV' % (edges_tmp[i],edges_tmp[i+1]))
+
+                if np.any(ebins != 'all'):
+                    for l in range(self.dataset.energies.n_energy_bins):
+                        if l == ebins[l]:
+                            ax.ravel()[i].set_title('%i-%i keV' % (edges_tmp[l],edges_tmp[l+1]))
+                else:
+                    ax.ravel()[i].set_title('%i-%i keV' % (edges_tmp[i],edges_tmp[i+1]))
+
                 ax.ravel()[i].grid(alpha=0.5,color='white')
                 ax.ravel()[i].set_xlabel('Gal. Lon. [deg]')
                 ax.ravel()[i].set_ylabel('Gal. Lat. [deg]')
