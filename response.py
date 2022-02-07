@@ -64,13 +64,26 @@ class SkyResponse:
 
     def CDS_Summed_Response(self):
 
-        #log.info('Creating general RMF matrices, stay tuned.')
-        print('Creating general RMF matrices, stay tuned...')
-        # sum over CDS (phi and psi/chi) axis 2 and 3 of matrix:
-        # this allows quicker weightings for the RMF later
         self.rsp.ZA_energy_response = 0
-        for i in tqdm(range(self.rsp.phis.n_phi_bins),'Loop over phi bins:'):
-            self.rsp.ZA_energy_response += np.sum(self.rsp.response_grid_normed[:,:,i,:,:,:],2)
+        
+        if self.n_e == 1:
+
+            print('You probably used a line response, there is no RMF.')
+            print('If not, think again.')
+
+        elif self.n_e > 1:
+            
+        #log.info('Creating general RMF matrices, stay tuned.')
+            print('Creating general RMF matrices, stay tuned...')
+            # sum over CDS (phi and psi/chi) axis 2 and 3 of matrix:
+            # this allows quicker weightings for the RMF later
+
+            for i in tqdm(range(self.rsp.phis.n_phi_bins),'Loop over phi bins:'):
+                self.rsp.ZA_energy_response += np.sum(self.rsp.response_grid_normed[:,:,i,:,:,:],2)
+
+        else:
+            print('This should not happen?!')
+                
         print('Done.\n')
 
         
