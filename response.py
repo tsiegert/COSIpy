@@ -474,7 +474,7 @@ class SkyResponse:
                 # reshape response grid the same way and choose only non-zero indices
                 # one energy (or same response for each chosen bin)
                 if self.n_e == 1:
-                    rsp_tmp = self.rsp.response_grid_normed.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins)[:,:,calc_this]
+                    rsp_tmp = self.rsp.response_grid_normed_efinal.reshape(self.n_b,self.n_l,self.rsp.n_phi_bins*self.rsp.n_fisbel_bins)[:,:,calc_this]
 
                 # multiple energy bins:
                 # choose nearest neighbour (center to center) to get response (TS: interpolation maybe later? how to if only three bands and one is a strong line?)
@@ -538,26 +538,32 @@ class SkyResponse:
             
             if self.verbose:
                 print('Calculating averaged RMF for object at (l,b) = (%.1f,%.1f)' % (self.l_src,self.b_src))
-            # zenith indices of response
-            zidx = np.floor(zens/dataset.pixel_size).astype(int)
-            # azimuth indices of response
-            aidx = np.floor(azis/dataset.pixel_size).astype(int)
-            
-            # remove out of bounds indices
-            weights = np.ones(len(zidx))
-            zidx[zidx < 0] = 0.
-            weights[zidx < 0] = 0.
-            aidx[aidx < 0] = 0.
-            weights[aidx < 0] = 0.
-            
-            # energy normalisation matrix (???)
-            erg_mat = np.meshgrid(self.e_wid,self.e_wid)
-            
-            # weighting the response at each pointing
-            self.rmf = 0
 
-            for n in tqdm(range(len(pointings.dtpoins)),'Loop over pointings:'):
-                self.rmf += self.rsp.ZA_energy_response[zidx[n],aidx[n],:,:].T/erg_mat[0]*pointings.dtpoins[n]*weights[n]
+            if self.n_e == 1:
+                print('No RMF still.')
+
+            elif self.n_e > 1:
+                
+                # zenith indices of response
+                zidx = np.floor(zens/dataset.pixel_size).astype(int)
+                # azimuth indices of response
+                aidx = np.floor(azis/dataset.pixel_size).astype(int)
+            
+                # remove out of bounds indices
+                weights = np.ones(len(zidx))
+                zidx[zidx < 0] = 0.
+                weights[zidx < 0] = 0.
+                aidx[aidx < 0] = 0.
+                weights[aidx < 0] = 0.
+            
+                # energy normalisation matrix (???)
+                erg_mat = np.meshgrid(self.e_wid,self.e_wid)
+            
+                # weighting the response at each pointing
+                self.rmf = 0
+
+                for n in tqdm(range(len(pointings.dtpoins)),'Loop over pointings:'):
+                    self.rmf += self.rsp.ZA_energy_response[zidx[n],aidx[n],:,:].T/erg_mat[0]*pointings.dtpoins[n]*weights[n]
 
 
 #            except AttributeError:
