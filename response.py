@@ -669,7 +669,7 @@ class SkyResponse:
             print('Plotting Compton response from (phi/psi/chi) = (%.1f/%.1f/%.1f) to (Z/A):' % (phi,psi,chi))
         
             idx = find_CDS_indices(phi,
-                                   psi,
+                                   psi-90.,
                                    chi,
                                    np.rad2deg(self.rsp.phis.phi_cen),
                                    np.rad2deg(self.rsp.fisbels.lat_cen)-90.,
