@@ -672,7 +672,7 @@ class SkyResponse:
                                    psi,
                                    chi,
                                    np.rad2deg(self.rsp.phis.phi_cen),
-                                   np.rad2deg(self.rsp.fisbels.lat_cen),
+                                   np.rad2deg(self.rsp.fisbels.lat_cen)-90.,
                                    np.rad2deg(self.rsp.fisbels.lon_cen))
         
             #print(idx)
