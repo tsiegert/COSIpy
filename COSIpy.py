@@ -1301,9 +1301,11 @@ class BG():
         elif self.bg_mode == 'from file':
             try:
                 with np.load(self.filename) as content:
-                    self.bg_response = content['bg_response']
+                    self.bg_response_all = content['bg_response']
                     self.n_bg_ph_per_bin = content['n_bg_ph_per_bin']
                     self.energy_bin_edges_bg = content['energy_bin_edges']
+
+                self.bg_response = self.construct_general_bg_response(dataset)
                     
             except FileNotFoundError:
                 print('File '+str(self.filename)+' not found.')
