@@ -537,7 +537,62 @@ class dataset(COSIpy):
 
 
 
-    
+    ##########################################
+    ## JB May 4, 2022: extend time_binning_tags function to take
+    # arbitrary time bins rather than one time bin size
+    def time_binning_tags_2(self,time_bin_size,time_binning=None):
+        """
+        Get COSI data reformatted to a data set per time bin.
+        Output is a dictionary of the form:
+        data = {'Full filename':COSI_Data['Full filename'],
+                'Bin number':b,
+                'Indices':tdx,
+                'DeltaTime':time}
+        :param: COSI_Data       dictionary from read_COSI_DataSet
+        :param: time_bin_size   np.array of custom time bin edges
+                                Default: none
+        """
+        # general time bin size
+        # TS: January 25: can be set to one number or general shape
+        #if not isinstance(time_bin_size, (list, tuple, np.ndarray)):
+        self.init_time_bin_size = time_bin_size
+        self.n_time_bins = len(self.init_time_bin_size)-1
+        # time conversions seconds to bin-size
+        s2b = 1./np.diff(self.init_time_bin_size)
+        # calculate last time bin interval
+        # ( how much is left in the data set inside the last bin )
+        self.last_bin_size = np.diff(self.init_time_bin_size)[-1] #self.init_time_bin_size[-1]
+        # fill data (as formatted per time tagged of individual time bins of size time_bin_size)
+        self.data_time_tagged = []
+        for b in range(self.n_time_bins):
+            tdx = np.where( (minmin(self.data['TimeTags'])*s2b[b] >= b) &
+                            (minmin(self.data['TimeTags'])*s2b[b] <  b+1) )[0]
+            tmp_data = {'Full filename':self.data['Full filename'],
+                        'Bin number':b,
+                        'Indices':tdx,
+                        'DeltaTime':np.diff(self.init_time_bin_size)[b] if b < self.n_time_bins else self.last_bin_size}
+            self.data_time_tagged.append(tmp_data)
+        self.times = TIME()
+        self.times.times_bins  = [self.data_time_tagged[i]['DeltaTime'] for i in range(self.n_time_bins)]#-1)]
+        self.times.n_time_bins = self.n_time_bins
+        self.times.times_edges = time_bin_size #np.cumsum(self.times.times_bins)
+        self.times.times_min   = self.times.times_edges[0:-1]
+        self.times.times_max   = self.times.times_edges[1:]
+        self.times.times_cen   = 0.5*(self.times.times_max+self.times.times_min)
+        self.times.times_wid   = 0.5*(self.times.times_max-self.times.times_min)
+        # total time for complete normalisation
+        # self.times.total_time  = np.diff(self.times.times_edges[[0,-1]])[0]
+        # need to take into account empty time bins
+        self.times.n_ph_t = np.array([len(self.data_time_tagged[i]['Indices']) for i in range(self.times.n_time_bins)])
+        #self.times.n_ph_t = np.array([len(self.data_time_tagged[i]['Indices']) for i in range(self.times.n_time_bins-1)])
+        self.times.n_ph_dx = np.where(self.times.n_ph_t != 0)[0]
+        self.times.n_ph   = len(self.times.n_ph_dx)
+        self.times.total_time  = 2*np.sum(self.times.times_wid)#[self.times.n_ph_dx])
+    #####################################
+
+
+
+
         
             
 
